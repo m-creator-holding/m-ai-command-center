@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>M-OS COMMAND CENTER</title>
+  <!-- system monospace fonts — no external CDN -->
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #030810;
+      overflow: hidden;
+      font-family: 'Courier New', 'SF Mono', 'Consolas', monospace;
+      color: #00C8FF;
+      user-select: none;
+    }
+
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+    }
+
+    #canvas-container canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    /* ── HUD OVERLAY ─────────────────────────────────────────── */
+    #hud {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    /* ── TOP BAR ─────────────────────────────────────────────── */
+    #hud-top {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 48px;
+      background: rgba(2, 10, 22, 0.92);
+      border-bottom: 1px solid rgba(0, 200, 255, 0.18);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 32px;
+    }
+
+    .hud-title {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 4px;
+      color: #00C8FF;
+      text-transform: uppercase;
+    }
+
+    .hud-separator {
+      width: 1px;
+      height: 24px;
+      background: rgba(0, 200, 255, 0.2);
+    }
+
+    .stat-block {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .stat-label {
+      font-size: 9px;
+      letter-spacing: 2px;
+      color: rgba(0, 200, 255, 0.45);
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .stat-value.cyan  { color: #00C8FF; }
+    .stat-value.amber { color: #FFB700; }
+    .stat-value.red   { color: #FF3030; }
+    .stat-value.green { color: #00E676; }
+
+    .system-state {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      letter-spacing: 3px;
+    }
+
+    .state-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    .state-dot.yellow { background: #FFB700; box-shadow: 0 0 8px #FFB700; }
+    .state-dot.green  { background: #00E676; box-shadow: 0 0 8px #00E676; }
+    .state-dot.red    { background: #FF3030; box-shadow: 0 0 8px #FF3030; }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ── LEFT PANEL ─────────────────────────────────────────── */
+    #hud-left {
+      position: absolute;
+      top: 48px; left: 0; bottom: 48px;
+      width: 220px;
+      background: rgba(2, 10, 22, 0.88);
+      border-right: 1px solid rgba(0, 200, 255, 0.12);
+      padding: 16px 0;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      font-size: 9px;
+      letter-spacing: 3px;
+      color: rgba(0, 200, 255, 0.4);
+      padding: 0 16px 10px;
+      border-bottom: 1px solid rgba(0, 200, 255, 0.08);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .dept-item {
+      display: flex;
+      align-items: center;
+      padding: 6px 16px;
+      gap: 10px;
+      cursor: default;
+      transition: background 0.15s;
+    }
+
+    .dept-item:hover {
+      background: rgba(0, 200, 255, 0.06);
+    }
+
+    .dept-indicator {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dept-indicator.active   { background: #00C8FF; box-shadow: 0 0 6px #00C8FF; }
+    .dept-indicator.warning  { background: #FFB700; box-shadow: 0 0 6px #FFB700; }
+    .dept-indicator.critical { background: #FF3030; box-shadow: 0 0 6px #FF3030; }
+    .dept-indicator.inactive { background: rgba(100, 140, 160, 0.35); }
+
+    .dept-name {
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      flex: 1;
+      color: rgba(0, 200, 255, 0.75);
+      text-transform: uppercase;
+    }
+
+    .dept-name.warning  { color: #FFB700; }
+    .dept-name.critical { color: #FF3030; }
+    .dept-name.inactive { color: rgba(100, 140, 160, 0.45); }
+
+    .dept-count {
+      font-size: 9px;
+      color: rgba(0, 200, 255, 0.4);
+    }
+
+    /* ── RIGHT PANEL ─────────────────────────────────────────── */
+    #hud-right {
+      position: absolute;
+      top: 48px; right: 0; bottom: 48px;
+      width: 240px;
+      background: rgba(2, 10, 22, 0.88);
+      border-left: 1px solid rgba(0, 200, 255, 0.12);
+      padding: 16px 0;
+      overflow: hidden;
+    }
+
+    .attention-item {
+      padding: 8px 16px;
+      border-bottom: 1px solid rgba(0, 200, 255, 0.06);
+    }
+
+    .attention-title {
+      font-size: 9px;
+      letter-spacing: 1px;
+      color: rgba(0, 200, 255, 0.55);
+      margin-bottom: 2px;
+    }
+
+    .attention-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: #FFB700;
+      line-height: 1.1;
+    }
+
+    .attention-value.red { color: #FF3030; }
+
+    .attention-label {
+      font-size: 9px;
+      color: rgba(255, 183, 0, 0.5);
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .attention-label.red { color: rgba(255, 48, 48, 0.55); }
+
+    .queue-list {
+      padding: 8px 16px;
+    }
+
+    .queue-header {
+      font-size: 9px;
+      letter-spacing: 2px;
+      color: rgba(0, 200, 255, 0.35);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .queue-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 9px;
+      line-height: 1.4;
+    }
+
+    .queue-bullet {
+      color: #FFB700;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .queue-text {
+      color: rgba(0, 200, 255, 0.5);
+      letter-spacing: 0.5px;
+    }
+
+    /* ── BOTTOM BAR ─────────────────────────────────────────── */
+    #hud-bottom {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 48px;
+      background: rgba(2, 10, 22, 0.92);
+      border-top: 1px solid rgba(0, 200, 255, 0.18);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      pointer-events: all;
+    }
+
+    .mode-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: rgba(0, 200, 255, 0.04);
+      border: 1px solid rgba(0, 200, 255, 0.12);
+      color: rgba(0, 200, 255, 0.45);
+      font-family: 'Courier New', 'SF Mono', 'Consolas', monospace;
+      font-size: 9px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .mode-btn:hover, .mode-btn.active {
+      background: rgba(0, 200, 255, 0.1);
+      border-color: rgba(0, 200, 255, 0.35);
+      color: #00C8FF;
+    }
+
+    .mode-key {
+      font-size: 8px;
+      opacity: 0.5;
+      border: 1px solid;
+      border-color: inherit;
+      padding: 1px 3px;
+    }
+
+    /* ── NODE TOOLTIP ────────────────────────────────────────── */
+    #tooltip {
+      position: fixed;
+      z-index: 20;
+      pointer-events: none;
+      display: none;
+      background: rgba(2, 10, 22, 0.95);
+      border: 1px solid rgba(0, 200, 255, 0.3);
+      padding: 10px 14px;
+      min-width: 180px;
+    }
+
+    #tooltip .tt-name {
+      font-size: 12px;
+      letter-spacing: 3px;
+      margin-bottom: 6px;
+    }
+
+    #tooltip .tt-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      color: rgba(0, 200, 255, 0.5);
+      margin-bottom: 2px;
+    }
+
+    #tooltip .tt-row span:last-child {
+      color: #00C8FF;
+    }
+
+    /* ── SCANLINE OVERLAY ────────────────────────────────────── */
+    #scanlines {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 0, 0, 0.03) 2px,
+        rgba(0, 0, 0, 0.03) 4px
+      );
+    }
+
+    /* ── CORNER DECORATIONS ──────────────────────────────────── */
+    .corner {
+      position: absolute;
+      width: 16px; height: 16px;
+      z-index: 15;
+    }
+
+    .corner.tl { top: 52px; left: 224px; border-top: 1px solid rgba(0,200,255,0.4); border-left: 1px solid rgba(0,200,255,0.4); }
+    .corner.tr { top: 52px; right: 244px; border-top: 1px solid rgba(0,200,255,0.4); border-right: 1px solid rgba(0,200,255,0.4); }
+    .corner.bl { bottom: 52px; left: 224px; border-bottom: 1px solid rgba(0,200,255,0.4); border-left: 1px solid rgba(0,200,255,0.4); }
+    .corner.br { bottom: 52px; right: 244px; border-bottom: 1px solid rgba(0,200,255,0.4); border-right: 1px solid rgba(0,200,255,0.4); }
+
+    /* live clock */
+    #live-clock {
+      font-size: 11px;
+      color: rgba(0, 200, 255, 0.35);
+      letter-spacing: 2px;
+      margin-left: auto;
+      margin-right: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- THREE.JS CANVAS -->
+  <div id="canvas-container"></div>
+
+  <!-- SCANLINES -->
+  <div id="scanlines"></div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <!-- TOP BAR -->
+    <div id="hud-top">
+      <span class="hud-title">M-OS Command Center</span>
+      <div class="hud-separator"></div>
+
+      <div class="stat-block">
+        <span class="stat-label">DEPT</span>
+        <span class="stat-value cyan" id="stat-depts">14</span>
+      </div>
+      <div class="stat-block">
+        <span class="stat-label">ACTIVE</span>
+        <span class="stat-value cyan" id="stat-active">21</span>
+      </div>
+      <div class="stat-block">
+        <span class="stat-label">TASKS</span>
+        <span class="stat-value cyan" id="stat-tasks">157</span>
+      </div>
+      <div class="stat-block">
+        <span class="stat-label">APPROVALS</span>
+        <span class="stat-value amber" id="stat-approvals">75</span>
+      </div>
+      <div class="stat-block">
+        <span class="stat-label">BLOCKED</span>
+        <span class="stat-value red" id="stat-blocked">42</span>
+      </div>
+
+      <div class="system-state">
+        <div class="state-dot yellow" id="state-dot"></div>
+        <span id="state-text">SYSTEM YELLOW</span>
+      </div>
+
+      <span id="live-clock">--:--:--</span>
+    </div>
+
+    <!-- LEFT: DEPARTMENT LIST -->
+    <div id="hud-left">
+      <div class="panel-header">Departments / 14</div>
+      <div id="dept-list"></div>
+    </div>
+
+    <!-- RIGHT: ATTENTION -->
+    <div id="hud-right">
+      <div class="panel-header">Owner Attention</div>
+
+      <div class="attention-item">
+        <div class="attention-title">PENDING APPROVALS</div>
+        <div class="attention-value" id="att-approvals">75</div>
+        <div class="attention-label">требуют решения</div>
+      </div>
+
+      <div class="attention-item">
+        <div class="attention-title">BLOCKED ACTIONS</div>
+        <div class="attention-value red" id="att-blocked">42</div>
+        <div class="attention-label red">заблокированы</div>
+      </div>
+
+      <div class="attention-item">
+        <div class="attention-title">ROOT QUEUE</div>
+        <div class="attention-value" style="font-size:18px;" id="att-root">2</div>
+        <div class="attention-label">root-действия</div>
+      </div>
+
+      <div class="queue-list">
+        <div class="queue-header">Очередь решений</div>
+        <div id="queue-items"></div>
+      </div>
+    </div>
+
+    <!-- BOTTOM: MODE BUTTONS -->
+    <div id="hud-bottom">
+      <button class="mode-btn active" data-mode="0"><span class="mode-key">1</span> OVERVIEW</button>
+      <button class="mode-btn" data-mode="1"><span class="mode-key">2</span> ATTENTION</button>
+      <button class="mode-btn" data-mode="2"><span class="mode-key">3</span> TRACE</button>
+      <button class="mode-btn" data-mode="3"><span class="mode-key">4</span> DEPARTMENTS</button>
+      <button class="mode-btn" data-mode="4"><span class="mode-key">5</span> THREATS</button>
+      <button class="mode-btn" data-mode="5"><span class="mode-key">6</span> PLAYBACK</button>
+    </div>
+
+    <!-- CORNER DECORATIONS -->
+    <div class="corner tl"></div>
+    <div class="corner tr"></div>
+    <div class="corner bl"></div>
+    <div class="corner br"></div>
+  </div>
+
+  <!-- TOOLTIP -->
+  <div id="tooltip">
+    <div class="tt-name" id="tt-name">BACKEND</div>
+    <div class="tt-row"><span>Tasks</span><span id="tt-tasks">—</span></div>
+    <div class="tt-row"><span>Workers</span><span id="tt-workers">—</span></div>
+    <div class="tt-row"><span>Blockers</span><span id="tt-blockers">—</span></div>
+    <div class="tt-row"><span>Status</span><span id="tt-status">—</span></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
